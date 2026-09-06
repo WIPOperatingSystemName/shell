@@ -1,0 +1,21 @@
+[package]
+name = "telorgon-compositor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+telorgon = {
+    git = "https://github.com/adamuremek/telorgon",
+    branch = "main",
+    default-features = false,
+    features = ["desktop-wayland-linux"]
+}
+
+[features]
+telorgon-profiler = ["telorgon/profiler"]
+
+[profile.telorgon-profile]
+inherits = "release"
+debug = 1
+incremental = true
+strip = "none"
