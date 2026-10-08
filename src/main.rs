@@ -1,295 +1,178 @@
-use std::path::PathBuf;
+mod settings;
+mod settings_config;
+mod desktop_entry;
+mod portal;
+mod constants;
+mod decoration;
+mod cursor;
+mod keybinds;
+mod taskbar;
+mod window;
+mod colors;
+mod hud;
+mod background;
 
+use crate::colors::COLOR7;
+use crate::background::{BackgroundControl, ShellBackground};
+use crate::decoration::DECORATION_POLICY;
+use crate::constants::*;
+use crate::taskbar::TestTaskbar;
+use crate::window::*;
 use telorgon::app::*;
-use telorgon::{
-    ClientCursorMode, CursorAsset, Easing, PointerGraphic, PointerIcon, PointerThemeOverrides,
-    TransitionSpec,
-};
 
 asset_catalog! {
     pub mod assets = "assets";
 }
 
-const TITLE_BAR_HEIGHT: f32 = 32.0;
-const FRAME_BORDER_WIDTH: f32 = 2.0;
-const FRAME_RADIUS: f32 = 14.0;
-const RESIZE_EDGE: f32 = 10.0;
-
-fn cursor(asset: CursorAsset, hotspot_x: u16, hotspot_y: u16) -> PointerGraphic {
-    PointerGraphic::new(asset)
-        .size(32)
-        .hotspot(hotspot_x, hotspot_y)
-        .tint(ColorRgba8::rgba(255, 255, 255, 255))
-}
-
-fn pointer_overrides() -> PointerThemeOverrides {
-    PointerThemeOverrides::new()
-        .set(PointerIcon::Default, cursor(assets::cursors::ARROW, 3, 3))
-        .set(
-            PointerIcon::Pointer,
-            cursor(assets::cursors::POINTER, 12, 4),
-        )
-        .set(PointerIcon::Text, cursor(assets::cursors::TEXT, 16, 16))
-        .set(PointerIcon::Move, cursor(assets::cursors::MOVE, 16, 16))
-        .set(
-            PointerIcon::AllResize,
-            cursor(assets::cursors::MOVE, 16, 16),
-        )
-        .set(
-            PointerIcon::EResize,
-            cursor(assets::cursors::RESIZE_EW, 16, 16),
-        )
-        .set(
-            PointerIcon::WResize,
-            cursor(assets::cursors::RESIZE_EW, 16, 16),
-        )
-        .set(
-            PointerIcon::EwResize,
-            cursor(assets::cursors::RESIZE_EW, 16, 16),
-        )
-        .set(
-            PointerIcon::ColResize,
-            cursor(assets::cursors::RESIZE_EW, 16, 16),
-        )
-        .set(
-            PointerIcon::NResize,
-            cursor(assets::cursors::RESIZE_NS, 16, 16),
-        )
-        .set(
-            PointerIcon::SResize,
-            cursor(assets::cursors::RESIZE_NS, 16, 16),
-        )
-        .set(
-            PointerIcon::NsResize,
-            cursor(assets::cursors::RESIZE_NS, 16, 16),
-        )
-        .set(
-            PointerIcon::RowResize,
-            cursor(assets::cursors::RESIZE_NS, 16, 16),
-        )
-}
-
-const WHITE: ColorRgba8 = ColorRgba8::rgba(255, 255, 255, 255);
-
-// Shared appearance for every control and interaction state.
-const fn control_visual(
-    background: ColorRgba8,
-    icon_tint: ColorRgba8,
-) -> WindowControlVisual {
-    WindowControlVisual {
-        decoration: BoxDecoration::new()
-            .background(Background::Color(background))
-            .corner_radius(0.0),
-        icon_tint,
-    }
-}
-
-const STANDARD_BUTTON: WindowControlButtonStyle = WindowControlButtonStyle {
-    width: Dimension::Pixels(38.0),
-    height: Dimension::FILL,
-    icon_size: 15.0,
-
-    resting: control_visual(
-        ColorRgba8::rgba(43, 49, 65, 255),
-        ColorRgba8::rgba(232, 236, 246, 255),
-    ),
-    hovered: Some(control_visual(
-        ColorRgba8::rgba(56, 64, 84, 255),
-        WHITE,
-    )),
-    pressed: Some(control_visual(
-        ColorRgba8::rgba(35, 40, 54, 255),
-        WHITE,
-    )),
-    focused: Some(control_visual(
-        ColorRgba8::rgba(43, 49, 65, 255),
-        WHITE,
-    )),
-    disabled: Some(control_visual(
-        ColorRgba8::rgba(36, 40, 51, 255),
-        ColorRgba8::rgba(116, 122, 140, 255),
-    )),
-
-    transition: Some(TransitionSpec {
-        duration_ms: 90,
-        easing: Easing::EaseOut,
-        repeat: false,
-    }),
-};
-
-const CLOSE_BUTTON: WindowControlButtonStyle = WindowControlButtonStyle {
-    resting: control_visual(
-        ColorRgba8::rgba(121, 42, 55, 255),
-        ColorRgba8::rgba(255, 230, 234, 255),
-    ),
-    hovered: Some(control_visual(
-        ColorRgba8::rgba(183, 52, 72, 255),
-        WHITE,
-    )),
-    pressed: Some(control_visual(
-        ColorRgba8::rgba(98, 31, 44, 255),
-        WHITE,
-    )),
-    ..STANDARD_BUTTON
-};
-
-const NORMAL_WINDOW: WindowChromeStateStyle = WindowChromeStateStyle {
-    title_bar_visible: true,
-    frame_radius: FRAME_RADIUS,
-    shadow: Some(Shadow {
-        offset: PointF { x: 0.0, y: 12.0 },
-        blur: 30.0,
-        spread: 0.0,
-        color: ColorRgba8::rgba(0, 0, 0, 128),
-    }),
-    resize_regions: true,
-    resize_edge: RESIZE_EDGE,
-    resize_hit_slop: Insets::all(0.0),
-};
-
-const TEST_CHROME: WindowChromeDesign = WindowChromeDesign {
-    resize_preview_color: Some(ColorRgba8::rgba(23, 27, 37, 150)),
-    active: WindowChromePalette {
-        frame_background: ColorRgba8::rgba(16, 201, 44, 255),
-        frame_border: ColorRgba8::rgba(101, 119, 184, 255),
-        frame_border_width: FRAME_BORDER_WIDTH,
-        title_color: ColorRgba8::rgba(245, 247, 255, 255),
-        title_weight: 650,
-    },
-    inactive: WindowChromePalette {
-        frame_background: ColorRgba8::rgba(16, 201, 44, 255),
-        frame_border: ColorRgba8::rgba(65, 70, 85, 255),
-        frame_border_width: FRAME_BORDER_WIDTH,
-        title_color: ColorRgba8::rgba(174, 179, 193, 255),
-        title_weight: 450,
-    },
-    normal: NORMAL_WINDOW,
-    maximized: WindowChromeStateStyle {
-        frame_radius: 0.0,
-        shadow: None,
-        resize_regions: false,
-        resize_edge: 0.0,
-        resize_hit_slop: Insets::ZERO,
-        ..NORMAL_WINDOW
-    },
-    tiled: WindowChromeStateStyle {
-        frame_radius: 0.0,
-        shadow: None,
-        ..NORMAL_WINDOW
-    },
-    fullscreen: WindowChromeStateStyle {
-        title_bar_visible: false,
-        frame_radius: 0.0,
-        shadow: None,
-        resize_regions: false,
-        resize_edge: 0.0,
-        resize_hit_slop: Insets::ZERO,
-    },
-    title_bar: WindowTitleBarStyle {
-        height: TITLE_BAR_HEIGHT,
-        padding: Insets::new(0.0, 0.0, 0.0, 8.8),
-        gap: 7.0,
-        title_size: 14.0,
-        app_icon_region_size: 32.0,
-        app_icon_size: 20.0,
-        show_client_icon: true,
-        fallback_app_icon: None,
-        app_icon_opens_system_menu: true,
-    },
-    controls: WindowControlsDesign {
-        minimize: WindowControlDesign {
-            icon: assets::icons::MINIMIZE,
-            style: STANDARD_BUTTON,
-        },
-        maximize: WindowControlDesign {
-            icon: assets::icons::MAXIMIZE,
-            style: STANDARD_BUTTON,
-        },
-        restore: WindowControlDesign {
-            icon: assets::icons::RESTORE,
-            style: STANDARD_BUTTON,
-        },
-        close: WindowControlDesign {
-            icon: assets::icons::CLOSE,
-            style: CLOSE_BUTTON,
-        },
-        gap: 7.0,
-    },
-    content_background: ColorRgba8::rgba(15, 18, 26, 255),
-};
-
-#[component]
-struct DesktopBackground {}
-
-impl Component for DesktopBackground {
-    fn view(&self) -> impl View {
-        stack()
-            .decoration(
-                BoxDecoration::new()
-                    .background(Background::Color(ColorRgba8::rgba(10, 12, 18, 255))),
-            )
-            .child(
-                image(assets::images::WALLPAPER)
-                    .width(Dimension::FILL)
-                    .height(Dimension::FILL),
-            )
-    }
-}
-
-#[component]
-struct TestPanel {}
-
-impl Component for TestPanel {
-    fn view(&self) -> impl View {
-        row()
-            .height(42.0)
-            .padding((7.0, 14.0))
-            .gap(10.0)
-            .align_items(Alignment::Center)
-            .decoration(
-                BoxDecoration::new()
-                    .background(Background::Color(ColorRgba8::rgba(17, 20, 29, 100)))
-                    .uniform_border(1.0, ColorRgba8::rgba(58, 65, 82, 255)),
-            )
-            .child(text("TELORGON TEST DESKTOP").size(13.0).weight(700))
-            .child(spacer())
-            .child(
-                text("custom chrome • client icons • code-defined pointers")
-                    .size(12.0)
-                    .color(ColorRgba8::rgba(155, 164, 188, 255))
-                    .pointer_icon(PointerIcon::Pointer),
-            )
-    }
-}
-
 fn main() -> telorgon::Result<()> {
-    let linux = LinuxDesktopConfig {
-        drm_device: PathBuf::from("/dev/dri/card1"),
-        socket_name: Some("telorgon-0".into()),
-        ..LinuxDesktopConfig::default()
+    if let Err(error) = desktop_entry::ensure_settings_entry() {
+        eprintln!("Could not create the Settings launcher entry: {error}");
+    }
+    let executable = std::env::current_exe().map_err(|e| telorgon::AppError::new(e.to_string()))?;
+    let applications = ApplicationRegistry::new()
+        .discover_xdg_applications()
+        .binary_directory(executable.parent().expect("executable has a parent directory"))
+        .register("capture-picker", ApplicationSpec::executable("telorgon-portal-picker"));
+    let applications = applications.register(
+        "network-settings",
+        ApplicationSpec::desktop_entry("org.telorgon.settings.desktop").arg("--page=network"),
+    );
+    let mut session = session::SessionConfig::new("telorgon-test-shell")
+        .applications(applications)
+        .desktop_settings(session::DesktopSettings::default());
+    // This shell owns the graphical session, including D-Bus-activated applications.
+    session.publish_user_service_environment = true;
+    let settings_store = settings_config::store().map_err(telorgon::AppError::new)?;
+    let preferences = settings_store.load().unwrap_or_else(|error| {
+        eprintln!("Settings could not be loaded; using defaults without overwriting the file: {error}");
+        Default::default()
+    });
+    let background = BackgroundControl::new(settings_store.clone(), preferences.personalization.clone());
+    let display_control = telorgon::host::application::display_control::DisplayControl::new(preferences.display.clone())
+        .map_err(telorgon::AppError::new)?;
+    let linux = LinuxShellConfig {
+        display_control: Some(display_control.clone()),
+        window_drag_horizontal_overflow: Some(250),
+        session,
+        preferred_window_minimum: MINIMUM_WINDOW_SIZE,
+        // Whole-window transitions also apply when a client owns its decorations.
+        window_motion: TEST_CHROME.motion,
+        resize_preview: TEST_CHROME
+            .resize_preview
+            .unwrap_or(LinuxShellConfig::default().resize_preview),
+        ..LinuxShellConfig::default()
     };
 
     let chrome = TEST_CHROME
         .validate()
         .expect("TEST_CHROME must contain valid finite metrics");
 
-    Application::desktop_environment("Telorgon Test Compositor")
+    let mut mixer = telorgon::host::application::audio_mixer::AudioMixer::start()
+        .map_err(|error| telorgon::AppError::new(error.to_string()))?;
+    let brightness = telorgon::screen_brightness::ScreenBrightnessController::new(Default::default())
+        .map_err(|error| telorgon::AppError::new(error.to_string()))?;
+    let brightness_handle = brightness.handle();
+    let network = telorgon::network::NetworkController::new(Default::default())
+        .map_err(|error| telorgon::AppError::new(error.to_string()))?;
+    let network_status = network.observer().signal();
+    let huds = hud::SystemHuds::start(mixer.handle().signal(), brightness_handle.signal())
+        .map_err(|error| telorgon::AppError::new(error.to_string()))?;
+    let keybindings = keybinds::get_keybinds()
+        .mixer_media_keys(mixer.handle(), 0.05, |error| eprintln!("Audio key: {error}"))
+        .map_err(|error| telorgon::AppError::new(error.to_string()))?
+        .screen_brightness_keys(
+            brightness_handle,
+            telorgon::screen_brightness::ScreenBrightnessTarget::DefaultInternal,
+            telorgon::screen_brightness::ScreenBrightnessKeyConfig::default(),
+        )
+        .map_err(|error| telorgon::AppError::new(error.to_string()))?
+        .on_system_action(huds.feedback());
+    let settings_service = settings::SettingsService::start(settings_store, preferences, display_control, mixer.handle(), background.clone())
+        .map_err(telorgon::AppError::new)?;
+    let mut tray = telorgon::tray::TrayHost::connect(telorgon::tray::TrayHostConfig::new())
+        .map_err(|error| telorgon::AppError::new(error.to_string()))?;
+    let battery_monitor = match futures_lite::future::block_on(battery::monitor(
+        battery::BatteryMonitorConfig::default(),
+    )) {
+        Ok(monitor) => Some(monitor),
+        Err(error) => {
+            eprintln!("Battery monitoring could not start: {error}");
+            None
+        }
+    };
+    let result = Application::shell_environment("Telorgon Test Shell")
         .linux(linux)
+        .screen_brightness(brightness)
+        .network(network)
+        .capture(Capture::desktop())
+        .applications(ApplicationCatalog::system().watch_changes(true))
         .renderer(Renderer::Vulkan)
         .assets(assets::bundle())
-        .pointer_overrides(pointer_overrides())
-        .client_cursor_mode(ClientCursorMode::Allow)
         .compositor(
             Compositor::new()
-                .window_frame(easy_window_frame(chrome))
-                .background(DesktopBackground::default()),
+                .screen_cast_portal(
+                    ScreenCastPortal::new()
+                        .audio(
+                            ShareAudio::new()
+                                .window_mode(AudioScope::SelectedApplication)
+                                .monitor_mode(AudioScope::Desktop)
+                                .exclude_requesting_application(true)
+                                .include_microphone(false),
+                        )
+                        .picker_app(ApplicationRef::registered("capture-picker"))
+                        .sharing(portal::CaptureIndicator::new),
+                )
+                .cursor_theme(cursor::cursor_theme())
+                .client_cursor_mode(ClientCursorMode::Allow)
+                .decoration_policy(DECORATION_POLICY)
+                .keybindings(keybindings)
+                .window_frame(easy_window_frame(chrome)),
         )
-        .shell_widget(
-            ShellWidget::new("panel")
-                .anchor(ShellWidgetAnchor::Top)
-                .height(ShellWidgetExtent::Pixels(42.0))
-                .reserve_space(42.0)
-                .content(TestPanel::default()),
+        .widget(ShellBackground::new(background))
+        .widget(hud::SystemHud::new(&huds))
+        .widget(TestTaskbar::with_services(
+            mixer.handle(),
+            tray.handle(),
+            battery_monitor.as_ref().map(|monitor| monitor.handle()),
+            network_status,
+        ))
+        .widget(
+            WindowTiling::snap()
+                .edge_threshold(32.0)
+                .corner_threshold(96.0)
+                .preview(TilePreviewDesign {
+                    fill: WINDOW_FILL,
+                    corner_radius: FRAME_RADIUS,
+                    border: Border::all(FRAME_BORDER_WIDTH, COLOR7),
+                    padding: Insets::all(8.0),
+                    ..TilePreviewDesign::default()
+                }),
         )
-        .run()
+        .run();
+    drop(huds);
+    drop(settings_service);
+    tray.shutdown();
+    mixer.shutdown();
+    if let Some(monitor) = battery_monitor {
+        if let Err(error) = futures_lite::future::block_on(monitor.shutdown()) {
+            eprintln!("Battery monitoring shutdown failed: {error}");
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod font_tests {
+    #[test]
+    fn bundled_inter_faces_are_valid_and_loadable() {
+        let bundle = super::assets::bundle().validate().unwrap();
+        let mut engine = telorgon::text::TextEngine::new().unwrap();
+        let fonts: Vec<_> = bundle.iter()
+            .filter(|entry| entry.kind == telorgon::AssetKind::Font).collect();
+        assert_eq!(fonts.len(), 4);
+        for font in fonts {
+            assert_eq!(font.media_type, "font/ttf");
+            engine.load_font_bytes(font.bytes.to_vec()).unwrap();
+        }
+    }
 }

@@ -1,14 +1,16 @@
 [package]
-name = "telorgon-compositor"
+name = "telorgon-test-shell"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+blocking = "1.6"
+zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
+futures-lite = "2"
 telorgon = {
-    git = "https://github.com/adamuremek/telorgon",
-    branch = "main",
+    path = "../telorgon/crates/telorgon",
     default-features = false,
-    features = ["desktop-wayland-linux"]
+    features = ["desktop-settings-linux", "tray-linux", "shell-wayland-linux", "shell-screen-brightness-linux", "shell-screencast-linux", "application-software", "application-vulkan-linux", "audio-linux", "desktop-audio-linux", "networkmanager-linux"]
 }
 
 [features]
@@ -19,3 +21,34 @@ inherits = "release"
 debug = 1
 incremental = true
 strip = "none"
+
+# Keep application debugging while making large-image pixel and codec work fast.
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.image-webp]
+opt-level = 3
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+
+[profile.dev.package.zune-core]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.flate2]
+opt-level = 3
+
+[profile.dev.package.fdeflate]
+opt-level = 3
+
+[profile.dev.package."miniz_oxide@0.8.9"]
+opt-level = 3
+
+[profile.dev.package."miniz_oxide@0.9.1"]
+opt-level = 3
