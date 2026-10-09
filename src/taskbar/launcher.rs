@@ -1,10 +1,12 @@
-//! Compact installed-application launcher. Power controls only affect this panel.
+//! Compact installed-application launcher with OS power controls.
 use super::{
     constants::*,
     taskbar::{task_button, taskbar_button_style},
 };
 use crate::{assets, colors::*};
 mod edit_menu;
+mod power;
+use power::PowerAction;
 use edit_menu::{EditMenu, EditMenuState};
 use std::sync::{Arc, Mutex};
 use telorgon::input::{ButtonState, LogicalKey, Modifiers, NamedKey};
@@ -90,10 +92,6 @@ pub(super) struct AppLauncher {
     #[state]
     focus_slot: Option<usize>,
     #[state]
-    focus_epoch: u64,
-    #[state]
-    powered_off: bool,
-    #[state]
     scroll_offset: f32,
     #[state]
     pointer: Option<PointF>,
@@ -104,9 +102,9 @@ pub(super) struct AppLauncher {
     #[state]
     hover_anchor: RectF,
     #[state]
-    restarting: Signal<usize>,
+    power_pending: Signal<Option<PowerAction>>,
     #[state]
-    restart_writer: SignalWriter<usize>,
+    power_writer: SignalWriter<Option<PowerAction>>,
     #[state]
     error: Signal<Option<String>>,
     #[state]
@@ -114,7 +112,7 @@ pub(super) struct AppLauncher {
 }
 impl AppLauncher {
     pub fn new(state: LauncherState) -> Self {
-        let (restarting, restart_writer) = Signal::new(0);
+        let (power_pending, power_writer) = Signal::new(None);
         let (error, error_writer) = Signal::new(None);
         let (edit_signal, edit_writer) = Signal::new(0);
         let editor = Arc::new(Mutex::new(ClipboardText::default()));
@@ -132,15 +130,13 @@ impl AppLauncher {
             edit_writer,
             search_focused: true,
             focus_slot: None,
-            focus_epoch: 0,
-            powered_off: false,
             scroll_offset: 0.0,
             pointer: None,
             hovered: None,
             selected: None,
             hover_anchor: RectF::default(),
-            restarting,
-            restart_writer,
+            power_pending,
+            power_writer,
             error,
             error_writer,
         }
@@ -232,27 +228,21 @@ impl AppLauncher {
         );
     }
 
-    fn restart(&mut self) {
-        if *self.restarting.snapshot() != 0 {
+    fn power_action(&mut self, action: PowerAction) {
+        if self.power_pending.snapshot().is_some() {
             return;
         }
-        {
-            let mut editor = self.editor.lock().unwrap();
-            editor.select_all();
-            let _ = editor.replace_selection("");
-        }
-        self.selected = None;
-        self.scroll_offset = 0.0;
-        self.search_focused = true;
-        self.focus_slot = None;
-        self.focus_epoch += 1;
+        self.hovered = None;
         self.error_writer.publish(None);
-        self.restart_writer.publish(1);
-        let writer = self.restart_writer.clone();
+        self.power_writer.publish(Some(action));
+        let pending = self.power_writer.clone();
+        let errors = self.error_writer.clone();
+        // D-Bus authorization and shutdown inhibitors must never block UI rendering.
         std::thread::spawn(move || {
-            for phase in [2, 3, 4, 0] {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                writer.publish(phase);
+            if let Err(error) = power::request(action) {
+                eprintln!("Power action {action:?} failed: {error}");
+                errors.publish(Some(action.failure(&error)));
+                pending.publish(None);
             }
         });
     }
@@ -441,8 +431,7 @@ impl ShellWidget for AppLauncher {
                 let y = viewport_y + offset;
                 let apps = self.apps();
                 let index = (y / (cell + GAP)) as usize * cols + (x / (cell + GAP)) as usize;
-                let hovered = if !self.powered_off
-                    && x >= 0.0
+                let hovered = if x >= 0.0
                     && x < grid_width
                     && viewport_y >= 0.0
                     && viewport_y < self.viewport_height()
@@ -460,12 +449,11 @@ impl ShellWidget for AppLauncher {
                     width: cell,
                     height: cell,
                 };
-                if !self.powered_off
-                    && position.y >= self.height() - PAD - 40.0
+                if position.y >= self.height() - PAD - 40.0
                     && position.y < self.height() - PAD
                 {
                     for (offset, label) in
-                        [(40.0, "Power off launcher"), (84.0, "Restart launcher")]
+                        [(40.0, "Shut down"), (84.0, "Restart")]
                     {
                         let left = self.width() - PAD - offset;
                         if position.x >= left && position.x < left + 40.0 {
@@ -484,7 +472,7 @@ impl ShellWidget for AppLauncher {
                 self.hover_anchor = anchor;
                 changed
             }
-            InputEvent::Scroll { delta, .. } if !self.powered_off => {
+            InputEvent::Scroll { delta, .. } => {
                 if !self.pointer.is_some_and(|point| {
                     point.x >= PAD
                         && point.x < self.width() - PAD
@@ -495,7 +483,7 @@ impl ShellWidget for AppLauncher {
                 }
                 self.scroll_by(-delta.y)
             }
-            InputEvent::Key(key) if key.state == ButtonState::Pressed && !self.powered_off => {
+            InputEvent::Key(key) if key.state == ButtonState::Pressed => {
                 if matches!(
                     key.logical_key,
                     LogicalKey::Named(NamedKey::PageDown | NamedKey::PageUp)
@@ -509,7 +497,7 @@ impl ShellWidget for AppLauncher {
                 }
                 if key.logical_key == LogicalKey::Named(NamedKey::Tab) {
                     let apps = self.apps().len();
-                    let count = apps + 2 + usize::from(*self.restarting.snapshot() == 0);
+                    let count = apps + 1 + 2 * usize::from(self.power_pending.snapshot().is_none());
                     let backwards = key.modifiers.contains(Modifiers::SHIFT);
                     let next = match self.focus_slot {
                         None => {
@@ -580,7 +568,7 @@ impl ShellWidget for AppLauncher {
 impl Component for AppLauncher {
     fn view(&self) -> impl View {
         let mut panel = column()
-            .key(format!("launcher-{}", self.focus_epoch))
+            .key("launcher")
             .width(self.width())
             .height(self.height())
             .padding(PAD)
@@ -588,24 +576,6 @@ impl Component for AppLauncher {
             .corner_radius(24.0)
             .background(Background::Color(COLOR1.with_alpha(245)))
             .uniform_border(1.0, COLOR2.with_alpha(100));
-        if self.powered_off {
-            return panel
-                .justify_content(Alignment::Center)
-                .align_items(Alignment::Center)
-                .child(
-                    task_button("Power on")
-                        .child(image(assets::icons::POWER).width(24.0).height(24.0))
-                        .width(48.0)
-                        .height(48.0)
-                        .inline_style(launcher_button_style(false))
-                        .on_press(|this: &mut Self| {
-                            this.powered_off = false;
-                            this.search_focused = true;
-                            this.focus_slot = None;
-                            this.focus_epoch += 1;
-                        }),
-                );
-        }
         let _ = self.watch(&self.edit_signal);
         let editor = self.editor.lock().unwrap().clone();
         let selection = editor.selection();
@@ -701,13 +671,7 @@ impl Component for AppLauncher {
             }
             grid = grid.child(line);
         }
-        let phase = *self.watch(&self.restarting);
-        let restart_icon = match phase {
-            1 => assets::icons::RESTART_1,
-            2 => assets::icons::RESTART_2,
-            3 => assets::icons::RESTART_3,
-            _ => assets::icons::RESTART,
-        };
+        let pending = *self.watch(&self.power_pending);
         let error = self.watch(&self.error);
         panel
             .child(
@@ -740,30 +704,30 @@ impl Component for AppLauncher {
                             .width(Dimension::FILL)
                             .overflow(telorgon::ui::Overflow::Clip)
                             .child(
-                                text(error.as_ref().map(String::as_str).unwrap_or(""))
+                                text(error.as_ref().map(String::as_str).unwrap_or_else(|| {
+                                    pending.map_or("", PowerAction::progress)
+                                }))
                                     .size(12.0)
                                     .color(COLOR7),
                             ),
                     )
                     .child(
-                        task_button("Restart launcher")
-                            .child(image(restart_icon).width(23.0).height(23.0))
+                        task_button("Restart")
+                            .child(image(assets::icons::RESTART).width(23.0).height(23.0))
                             .width(40.0)
                             .height(40.0)
                             .inline_style(launcher_button_style(false))
-                            .enabled(phase == 0)
-                            .on_press(|this: &mut Self| this.restart()),
+                            .enabled(pending.is_none())
+                            .on_press(|this: &mut Self| this.power_action(PowerAction::Restart)),
                     )
                     .child(
-                        task_button("Power off launcher")
+                        task_button("Shut down")
                             .child(image(assets::icons::POWER).width(23.0).height(23.0))
                             .width(40.0)
                             .height(40.0)
                             .inline_style(launcher_button_style(false))
-                            .on_press(|this: &mut Self| {
-                                this.powered_off = true;
-                                this.hovered = None;
-                            }),
+                            .enabled(pending.is_none())
+                            .on_press(|this: &mut Self| this.power_action(PowerAction::Shutdown)),
                     ),
             )
     }
