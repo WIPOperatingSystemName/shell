@@ -11,6 +11,9 @@ mod window;
 mod colors;
 mod hud;
 mod background;
+mod system_shell;
+mod session_manager;
+mod session_pixels;
 
 use crate::colors::COLOR7;
 use crate::background::{BackgroundControl, ShellBackground};
@@ -25,6 +28,15 @@ asset_catalog! {
 }
 
 fn main() -> telorgon::Result<()> {
+    match std::env::args().skip(1).collect::<Vec<_>>().as_slice() {
+        [] => {}
+        [mode] if mode == "--system-shell" => return system_shell::run(),
+        [mode] if mode == "--session-manager" => return session_manager::run(),
+        [mode, user] if mode == "--session-worker" => return session_manager::worker(user),
+        [mode] if mode == "--user-session" => return session_manager::user_session(),
+        [mode, user] if mode == "--set-user-password" => return session_manager::set_password(user),
+        _ => return Err(telorgon::AppError::new("Usage: telorgon-test-shell [--system-shell]")),
+    }
     if let Err(error) = desktop_entry::ensure_settings_entry() {
         eprintln!("Could not create the Settings launcher entry: {error}");
     }

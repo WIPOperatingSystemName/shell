@@ -7,6 +7,8 @@ edition = "2024"
 blocking = "1.6"
 zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
 futures-lite = "2"
+libc = "0.2"
+serde_json = "1"
 telorgon = {
     path = "../telorgon/crates/telorgon",
     default-features = false,

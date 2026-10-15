@@ -255,7 +255,7 @@ impl ShellWidget for ShellBackground {
             .pointer(ShellPointer::PassThrough)
     }
 }
-fn cover(source: SizeI, viewport: SizeF) -> (SizeF, PointF) {
+pub(crate) fn cover(source: SizeI, viewport: SizeF) -> (SizeF, PointF) {
     let width = source.width.max(1) as f32;
     let height = source.height.max(1) as f32;
     let scale = (viewport.width.max(1.0) / width).max(viewport.height.max(1.0) / height);

@@ -2911,6 +2911,8 @@ version = "0.1.0"
 dependencies = [
  "blocking",
  "futures-lite",
+ "libc",
+ "serde_json",
  "telorgon",
  "zbus",
 ]
